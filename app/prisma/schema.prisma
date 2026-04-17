@@ -1,0 +1,264 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  settings     UserSettings?
+  subscription UserSubscription?
+  progress     UserProgress[]
+  srsItems     SRSItem[]
+  lessonAccess UserLessonAccess[]
+  examResults  ExamResult[]
+
+  @@map("users")
+}
+
+model UserSettings {
+  id           String   @id @default(cuid())
+  userId       String   @unique @map("user_id")
+  dailyReviewCap Int    @default(50) @map("daily_review_cap")
+  theme        String   @default("ghost_of_yotei")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model UserSubscription {
+  id        String    @id @default(cuid())
+  userId    String    @unique @map("user_id")
+  tier      String    @default("FREE")
+  status    String    @default("ACTIVE")
+  startsAt  DateTime  @map("starts_at")
+  expiresAt DateTime? @map("expires_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_subscriptions")
+}
+
+model Lesson {
+  id             String   @id @default(cuid())
+  course         String
+  sequenceNumber Int      @map("sequence_number")
+  title          String
+  titleJp        String?  @map("title_jp")
+  description    String?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  sections     LessonSection[]
+  vocabulary   Vocabulary[]
+  grammarPoints GrammarPoint[]
+  exercises    Exercise[]
+  userAccess   UserLessonAccess[]
+  userProgress UserProgress[]
+
+  @@unique([course, sequenceNumber])
+  @@map("lessons")
+}
+
+model LessonSection {
+  id         String   @id @default(cuid())
+  lessonId   String   @map("lesson_id")
+  type       String
+  title      String
+  content    String?  @db.Text
+  orderIndex Int      @map("order_index")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@map("lesson_sections")
+}
+
+model Vocabulary {
+  id              String   @id @default(cuid())
+  lessonId        String?  @map("lesson_id")
+  word            String
+  reading         String
+  meaning         String
+  jlptLevel       String   @map("jlpt_level")
+  audioUrl        String?  @map("audio_url")
+  exampleSentence String?  @map("example_sentence") @db.Text
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  lesson   Lesson?   @relation(fields: [lessonId], references: [id])
+  srsItems SRSItem[]
+
+  @@map("vocabulary")
+}
+
+model GrammarPoint {
+  id           String   @id @default(cuid())
+  lessonId     String?  @map("lesson_id")
+  name         String
+  nameJp       String?  @map("name_jp")
+  meaning      String   @db.Text
+  usagePattern String?  @map("usage_pattern") @db.Text
+  examples     String   @db.Text
+  jlptLevel    String   @map("jlpt_level")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  lesson Lesson? @relation(fields: [lessonId], references: [id])
+
+  @@map("grammar_points")
+}
+
+model Exercise {
+  id            String   @id @default(cuid())
+  lessonId      String   @map("lesson_id")
+  type          String
+  question      String   @db.Text
+  options       String?  @db.Text
+  correctAnswer String   @map("correct_answer")
+  explanation   String?  @db.Text
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@map("exercises")
+}
+
+model SRSItem {
+  id                  String    @id @default(cuid())
+  userId              String    @map("user_id")
+  vocabularyId        String    @map("vocabulary_id")
+  easiness            Float     @default(2.5)
+  interval            Int       @default(0)
+  repetitions         Int       @default(0)
+  nextReview          DateTime  @map("next_review")
+  lastReviewed        DateTime? @map("last_reviewed")
+  consecutiveFailures Int       @default(0) @map("consecutive_failures")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vocabulary Vocabulary @relation(fields: [vocabularyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, vocabularyId])
+  @@index([userId, nextReview])
+  @@map("srs_items")
+}
+
+model UserLessonAccess {
+  id         String   @id @default(cuid())
+  userId     String   @map("user_id")
+  lessonId   String   @map("lesson_id")
+  unlockedAt DateTime @default(now()) @map("unlocked_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+  @@map("user_lesson_access")
+}
+
+model UserProgress {
+  id                 String    @id @default(cuid())
+  userId             String    @map("user_id")
+  lessonId           String    @map("lesson_id")
+  section            String
+  itemsViewed        Int       @default(0) @map("items_viewed")
+  explanationsRead   Int       @default(0) @map("explanations_read")
+  examplesListened   Int       @default(0) @map("examples_listened")
+  exercisesCompleted Int       @default(0) @map("exercises_completed")
+  accuracy           Float?
+  completed          Boolean   @default(false)
+  completedAt        DateTime? @map("completed_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId, section])
+  @@map("user_progress")
+}
+
+model MockExam {
+  id          String   @id @default(cuid())
+  level       String
+  title       String
+  description String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  questions ExamQuestion[]
+  results   ExamResult[]
+
+  @@map("mock_exams")
+}
+
+model ExamQuestion {
+  id            String   @id @default(cuid())
+  examId        String   @map("exam_id")
+  section       String
+  questionNum   Int      @map("question_num")
+  question      String   @db.Text
+  options       String   @db.Text
+  correctAnswer String   @map("correct_answer")
+  topic         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  exam MockExam @relation(fields: [examId], references: [id], onDelete: Cascade)
+
+  @@map("exam_questions")
+}
+
+model ExamResult {
+  id              String   @id @default(cuid())
+  userId          String   @map("user_id")
+  examId          String   @map("exam_id")
+  totalScore      Int      @map("total_score")
+  vocabularyScore Int      @map("vocabulary_score")
+  grammarScore    Int      @map("grammar_score")
+  readingScore    Int      @map("reading_score")
+  listeningScore  Int      @map("listening_score")
+  prediction      String
+  confidence      Float
+  takenAt         DateTime @default(now()) @map("taken_at")
+
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exam MockExam @relation(fields: [examId], references: [id], onDelete: Cascade)
+
+  @@map("exam_results")
+}
+
+model Article {
+  id          String   @id @default(cuid())
+  source      String
+  language    String
+  title       String
+  titleEn     String?  @map("title_en")
+  content     String   @db.Text
+  difficulty  String
+  publishedAt DateTime @map("published_at")
+  imageUrl    String?  @map("image_url")
+  sourceUrl   String   @map("source_url")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("articles")
+}

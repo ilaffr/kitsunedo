@@ -1,0 +1,103 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: kitsunedo_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Generate Prisma client
+        working-directory: app
+        run: npx prisma generate
+
+      - name: Run migrations
+        working-directory: app
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/kitsunedo_test
+        run: npx prisma migrate deploy
+
+      - name: Lint
+        working-directory: app
+        run: npm run lint
+
+      - name: Test
+        working-directory: app
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/kitsunedo_test
+          REDIS_URL: redis://localhost:6379
+          NEXTAUTH_SECRET: test-secret
+          NEXTAUTH_URL: http://localhost:3000
+        run: npm test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /opt/kitsunedo
+            git pull origin main
+
+            # Backup database before deploy
+            docker-compose -f docker-compose.prod.yml exec -T db \
+              pg_dump -U $POSTGRES_USER $POSTGRES_DB > backups/pre-deploy-$(date +%Y%m%d-%H%M%S).sql
+
+            # Build and restart
+            docker-compose -f docker-compose.prod.yml build app
+            docker-compose -f docker-compose.prod.yml up -d
+
+            # Run migrations
+            docker-compose -f docker-compose.prod.yml exec -T app \
+              npx prisma migrate deploy
+
+            # Health check
+            sleep 10
+            curl -f http://localhost:3000/api/health || exit 1
+
+            echo "Deploy complete"
