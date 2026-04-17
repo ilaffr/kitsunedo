@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "stop": {
+      "enabled": true,
+      "commands": ["/myinsights --auto"]
+    }
+  },
+  "memory": {
+    "enabled": true
+  }
+}
