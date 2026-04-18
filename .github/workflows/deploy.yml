@@ -75,29 +75,28 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          if [ -z "$VPS_HOST" ]; then
+            echo "::notice::VPS secrets not configured — skipping deploy (add VPS_HOST, VPS_USER, VPS_SSH_KEY to repo secrets)"
+            exit 0
+          fi
+
+          echo "$VPS_SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+
+          ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" << 'ENDSSH'
             cd /opt/kitsunedo
             git pull origin main
-
-            # Backup database before deploy
             docker-compose -f docker-compose.prod.yml exec -T db \
               pg_dump -U $POSTGRES_USER $POSTGRES_DB > backups/pre-deploy-$(date +%Y%m%d-%H%M%S).sql
-
-            # Build and restart
             docker-compose -f docker-compose.prod.yml build app
             docker-compose -f docker-compose.prod.yml up -d
-
-            # Run migrations
-            docker-compose -f docker-compose.prod.yml exec -T app \
-              npx prisma migrate deploy
-
-            # Health check
+            docker-compose -f docker-compose.prod.yml exec -T app npx prisma migrate deploy
             sleep 10
             curl -f http://localhost:3000/api/health || exit 1
-
             echo "Deploy complete"
+          ENDSSH
